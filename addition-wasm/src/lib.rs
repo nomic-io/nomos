@@ -1,6 +1,6 @@
 use actions::Action;
 use nomos_runtime as runtime;
-use runtime::{print, read, upgrade, write};
+use runtime::root::{execute, print, read, upgrade, write};
 
 #[no_mangle]
 pub extern "C" fn _run() {
@@ -21,6 +21,13 @@ fn run(action: Action) {
         }
         Action::Upgrade(new_code) => {
             upgrade(new_code);
+        }
+        Action::Execute(code_vec) => {
+            print("got execute action in adder");
+            write(b"code_to_execute", code_vec);
+            print("wrote code to store");
+            execute(b"code_to_execute".to_vec());
+            print("called host execute");
         }
     }
 }

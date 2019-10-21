@@ -1,12 +1,21 @@
 use byteorder::ByteOrder;
+use nomos_runtime::root::ExecutionMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str;
-use wasmer_runtime::{error, func, imports, instantiate, units, Ctx, Value};
+use wasmer_runtime::{
+    error, func, imports, instantiate, units, Ctx, ImportObject, Instance, Value,
+};
 
 pub struct VM {
     code: Vec<u8>,
     pub state: HashMap<Vec<u8>, Vec<u8>>,
+}
+
+type Instantiator = fn(&[u8], &ImportObject) -> error::Result<Instance>;
+pub struct SharedContext {
+    pub state: HashMap<Vec<u8>, Vec<u8>>,
+    pub instantiate: Instantiator,
 }
 
 impl VM {
@@ -21,15 +30,22 @@ impl VM {
     }
 
     pub fn next(&mut self, action_bytes: &Vec<u8>) {
-        let mut state: HashMap<Vec<u8>, Vec<u8>> = self.state.clone();
-        state.insert(b"input".to_vec(), action_bytes.to_vec());
-        state.insert(b"code".to_vec(), self.code.to_vec());
+        let mut last_state: HashMap<Vec<u8>, Vec<u8>> = self.state.clone();
+        last_state.insert(b"input".to_vec(), action_bytes.to_vec());
+        last_state.insert(b"code".to_vec(), self.code.to_vec());
+
+        let mut shared_context = SharedContext {
+            state: last_state,
+            instantiate,
+        };
 
         let get_length = |ctx: &mut Ctx, length_result_ptr: u32, key_ptr: u32, key_len: u32| {
             // Think of this line as a very fancy reference to the state variable from above:
-            let mut state: &mut HashMap<Vec<u8>, Vec<u8>> =
-                unsafe { &mut *(ctx.data as *mut HashMap<Vec<u8>, Vec<u8>>) };
-
+            // let mut state: &mut HashMap<Vec<u8>, Vec<u8>> =
+            //     unsafe { &mut *(ctx.data as *mut HashMap<Vec<u8>, Vec<u8>>) };
+            let mut shared_context: &mut SharedContext =
+                unsafe { &mut *(ctx.data as *mut SharedContext) };
+            let state = &mut shared_context.state;
             let memory = ctx.memory(0);
             let key_vec: Vec<_> = memory.view()[key_ptr as usize..(key_ptr + key_len) as usize]
                 .iter()
@@ -51,8 +67,9 @@ impl VM {
 
         let get_state = |ctx: &mut Ctx, key_ptr: u32, key_len: u32, result_vec_ptr: u32| {
             // Think of this line as a very fancy reference to the state variable from above:
-            let mut state: &mut HashMap<Vec<u8>, Vec<u8>> =
-                unsafe { &mut *(ctx.data as *mut HashMap<Vec<u8>, Vec<u8>>) };
+            let mut shared_context: &mut SharedContext =
+                unsafe { &mut *(ctx.data as *mut SharedContext) };
+            let state = &mut shared_context.state;
 
             let memory = ctx.memory(0);
             let key_vec: Vec<_> = memory.view()[key_ptr as usize..(key_ptr + key_len) as usize]
@@ -73,8 +90,9 @@ impl VM {
 
         let set_state =
             |ctx: &mut Ctx, key_ptr: u32, key_len: u32, value_ptr: u32, value_len: u32| {
-                let mut state: &mut HashMap<Vec<u8>, Vec<u8>> =
-                    unsafe { &mut *(ctx.data as *mut HashMap<Vec<u8>, Vec<u8>>) };
+                let mut shared_context: &mut SharedContext =
+                    unsafe { &mut *(ctx.data as *mut SharedContext) };
+                let state = &mut shared_context.state;
 
                 let memory = ctx.memory(0);
                 let key_vec: Vec<_> = memory.view()[key_ptr as usize..(key_ptr + key_len) as usize]
@@ -92,8 +110,9 @@ impl VM {
             };
 
         let upgrade_code = |ctx: &mut Ctx, code_ptr: u32, code_len: u32| {
-            let mut state: &mut HashMap<Vec<u8>, Vec<u8>> =
-                unsafe { &mut *(ctx.data as *mut HashMap<Vec<u8>, Vec<u8>>) };
+            let mut shared_context: &mut SharedContext =
+                unsafe { &mut *(ctx.data as *mut SharedContext) };
+            let state = &mut shared_context.state;
             let memory = ctx.memory(0);
             let code_vec: Vec<_> = memory.view()[code_ptr as usize..(code_ptr + code_len) as usize]
                 .iter()
@@ -103,8 +122,43 @@ impl VM {
             state.insert(b"code".to_vec(), code_vec);
         };
 
+        let execute_code =
+            |ctx: &mut Ctx, execution_msg_bytes_ptr: u32, execution_msg_bytes_len: u32| {
+                let mut shared_context: &mut SharedContext =
+                    unsafe { &mut *(ctx.data as *mut SharedContext) };
+                let state = &mut shared_context.state;
+                let instantiate_child = &mut shared_context.instantiate;
+                let memory = ctx.memory(0);
+                let execution_msg_bytes: Vec<_> = memory.view()[execution_msg_bytes_ptr as usize
+                    ..(execution_msg_bytes_ptr + execution_msg_bytes_len) as usize]
+                    .iter()
+                    .map(|cell: &std::cell::Cell<u8>| cell.get())
+                    .collect();
+
+                let execution_msg: ExecutionMessage =
+                    bincode::deserialize(&execution_msg_bytes).unwrap();
+
+                match execution_msg {
+                    ExecutionMessage::Start { code_key } => {
+                        let code_to_execute = state.get(&code_key).unwrap();
+                        println!("got code to execute.");
+                        let child = instantiate_child(
+                            code_to_execute.as_slice(),
+                            &imports! {
+                                "env" => {
+                                    "print_str" => func!(print_str),
+                                },
+                            },
+                        )
+                        .unwrap();
+                        child.call("_run", &[]).expect("Child call failed");
+                    }
+                    _ => panic!("Invalid first execution message"),
+                };
+            };
+
         let dtor = (|_: *mut std::ffi::c_void| {}) as fn(*mut std::ffi::c_void);
-        let ptr = &mut state as *mut _ as *mut std::ffi::c_void;
+        let ptr = &mut shared_context as *mut _ as *mut std::ffi::c_void;
         let import_object = imports! {
             move || {
                 (ptr, dtor)
@@ -115,22 +169,13 @@ impl VM {
                 "set_state" => func!(set_state),
                 "get_length" => func!(get_length),
                 "upgrade_code" => func!(upgrade_code),
+                "execute_code" => func!(execute_code),
             },
         };
 
         let mut instance = instantiate(self.code.as_slice(), &import_object).unwrap();
         // Write action bytes into wasm memory
         let memory = instance.context_mut().memory(0);
-        // TODO: perhaps grow memory depending on input size?
-
-        // let memory_grow_result = memory.grow(units::Pages(10));
-        // println!("memory grow result: {:?}", memory_grow_result);
-        // for (byte, cell) in action_bytes
-        //     .iter()
-        //     .zip(memory.view()[0 as usize..action_bytes.len() as usize].iter())
-        // {
-        //     cell.set(*byte);
-        // }
 
         let values = instance
             .call(
@@ -140,8 +185,12 @@ impl VM {
             )
             .expect("Calling run method failed");
 
-        self.state = state.clone();
-        self.code = state.get(&b"code".to_vec()).unwrap().to_vec();
+        self.state = shared_context.state.clone();
+        self.code = shared_context
+            .state
+            .get(&b"code".to_vec())
+            .unwrap()
+            .to_vec();
     }
 }
 
