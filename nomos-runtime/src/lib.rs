@@ -104,12 +104,12 @@ impl Child {
         }
     }
 
-    pub fn get(&self, key: Vec<u8>) -> Option<Vec<u8>> {
+    pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Option<Vec<u8>> {
         let current_store = read(&self.store_key);
         match current_store {
             Some(store_bytes) => {
                 let store: HashMap<Vec<u8>, Vec<u8>> = bincode::deserialize(&store_bytes).unwrap();
-                let value = store.get(&key);
+                let value = store.get(&key.as_ref().to_vec());
                 match value {
                     Some(val) => Some(val.to_vec()),
                     None => None,
@@ -118,7 +118,7 @@ impl Child {
             None => None,
         }
     }
-    pub fn set(&self, key: Vec<u8>, value: Vec<u8>) {
+    pub fn set<K: AsRef<[u8]>, V: AsRef<[u8]>>(&self, key: K, value: V) {
         let current_store = read(&self.store_key);
         let mut child_store = match current_store {
             Some(store_bytes) => {
@@ -132,7 +132,7 @@ impl Child {
             }
         };
 
-        child_store.insert(key, value);
+        child_store.insert(key.as_ref().to_vec(), value.as_ref().to_vec());
         let serialized_store = bincode::serialize(&child_store).unwrap();
         write(&self.store_key, serialized_store);
     }

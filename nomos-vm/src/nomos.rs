@@ -1,20 +1,15 @@
 use byteorder::ByteOrder;
-use failure::Error;
 use nomos_runtime::ExecutionMessage;
-use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::collections::HashMap;
 use std::str;
-use wasmer_runtime::{
-    error, func, imports, instantiate, units, Ctx, ImportObject, Instance, Value,
-};
+use wasmer_runtime::{func, imports, instantiate, Ctx};
 
 pub struct VM {
     code: Vec<u8>,
     pub state: HashMap<Vec<u8>, Vec<u8>>,
 }
 
-type Instantiator = fn(&[u8], &ImportObject) -> error::Result<Instance>;
 pub struct SharedContext {
     pub state: HashMap<Vec<u8>, Vec<u8>>,
     pub code: Vec<u8>,
@@ -45,8 +40,6 @@ impl VM {
 
         let get_length = |ctx: &mut Ctx, length_result_ptr: u32, key_ptr: u32, key_len: u32| {
             // Think of this line as a very fancy reference to the state variable from above:
-            // let mut state: &mut HashMap<Vec<u8>, Vec<u8>> =
-            //     unsafe { &mut *(ctx.data as *mut HashMap<Vec<u8>, Vec<u8>>) };
             let mut shared_context: &mut SharedContext =
                 unsafe { &mut *(ctx.data as *mut SharedContext) };
             let state = &mut shared_context.state;
