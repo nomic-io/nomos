@@ -3,9 +3,11 @@ use nomos_runtime::{execute, print, read, upgrade, write, Child};
 
 #[no_mangle]
 pub extern "C" fn _run() {
+    print("hello from the addition program");
     let input_bytes = read(b"input").unwrap();
     let action: Action = bincode::deserialize(&input_bytes[..]).unwrap();
-    run(action);
+    print(&format!("here is the action inside the add program: {:?}", action)[..]);
+    // run(action);
 }
 
 fn run(action: Action) {
@@ -22,14 +24,15 @@ fn run(action: Action) {
             upgrade(new_code);
         }
         Action::Execute(code_vec) => {
-            write(b"code_to_execute", code_vec);
-            let x = 4;
-            let x_bytes = bincode::serialize(&x).unwrap();
-            let child = Child::new(b"code_to_execute".to_vec(), b"child_store".to_vec());
-            child.set(b"x".to_vec(), x_bytes);
-            child.call("_run");
-            let result = child.get(b"x".to_vec()).unwrap();
-            print(&format!("Value of child.foo after call: {:?}", result)[..]);
+            // write(b"code_to_execute", code_vec);
+            // let x = 4;
+            // let x_bytes = bincode::serialize(&x).unwrap();
+            // let child = Child::new(b"code_to_execute".to_vec(), b"child_store".to_vec());
+            // let key = b"x".to_vec();
+            // child.set(&key, x_bytes);
+            // child.call("_run");
+            // let result = child.get(&key).unwrap();
+            // print(&format!("Value of child.foo after call: {:?}", result)[..]);
         }
     }
 }

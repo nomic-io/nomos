@@ -17,19 +17,19 @@ mod tests {
 
         let increment_msg_bytes = bincode::serialize(&increment_msg).unwrap();
 
-        vm.next(&increment_msg_bytes);
-        vm.next(&increment_msg_bytes);
+        vm.set(b"input", increment_msg_bytes);
+        vm.call("_run");
 
         // let decoded_msg: actions::Action = bincode::deserialize(&msg_bytes[..]).unwrap();
 
-        let execute_action = actions::Action::Execute(multiply_bytes.to_vec());
-        let execute_action_bytes = bincode::serialize(&execute_action).unwrap();
+        // let execute_action = actions::Action::Execute(multiply_bytes.to_vec());
+        // let execute_action_bytes = bincode::serialize(&execute_action).unwrap();
 
-        vm.next(&execute_action_bytes);
+        // vm.next(&execute_action_bytes);
 
-        println!(
-            "count, after adding 6 three times: {:?}",
-            vm.state.get(&b"count".to_vec())
-        );
+        // println!(
+        //     "count, after adding 6 three times: {:?}",
+        //     vm.state.get(&b"count".to_vec())
+        // );
     }
 }

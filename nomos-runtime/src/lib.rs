@@ -43,8 +43,6 @@ pub fn read<K: AsRef<[u8]>>(key: K) -> Option<Vec<u8>> {
     if value_length == 0 {
         return None;
     }
-    print(&format!("value length: {}", value_length)[..]);
-    // unsafe { get_state(key.as_ptr(), key.len() as usize) };
     let value_bytes = vec![0; value_length];
 
     // Tell the host to load up the value bytes for this key.

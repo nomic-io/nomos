@@ -17,29 +17,29 @@ pub struct VM {
 type Instantiator = fn(&[u8], &ImportObject) -> error::Result<Instance>;
 pub struct SharedContext {
     pub state: HashMap<Vec<u8>, Vec<u8>>,
-    pub instantiate: Instantiator,
     pub code: Vec<u8>,
 }
 
 impl VM {
     pub fn new(code: Vec<u8>) -> VM {
         let mut state: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
-        let initial_count = 0;
-        state.insert(
-            b"count".to_vec(),
-            bincode::serialize(&initial_count).unwrap(),
-        );
         VM { code, state }
     }
 
-    pub fn next(&mut self, action_bytes: &Vec<u8>) {
+    pub fn set<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, value: V) {
+        self.state
+            .insert(key.as_ref().to_vec(), value.as_ref().to_vec());
+    }
+
+    pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Option<&Vec<u8>> {
+        self.state.get(&key.as_ref().to_vec())
+    }
+
+    pub fn call(&mut self, function_name: &str) {
         let mut last_state: HashMap<Vec<u8>, Vec<u8>> = self.state.clone();
-        last_state.insert(b"input".to_vec(), action_bytes.to_vec());
-        // last_state.insert(b"code".to_vec(), self.code.to_vec());
 
         let mut shared_context = SharedContext {
             state: last_state,
-            instantiate,
             code: self.code.clone(),
         };
 
@@ -165,8 +165,8 @@ impl VM {
                             }
                             Ok(child_store) => {
                                 child_vm.state = child_store;
-                                let empty_input: Vec<u8> = vec![0; 0];
-                                let execution_result = child_vm.next(&empty_input);
+                                let execution_result =
+                                    child_vm.call(&execution_msg.entry_function_name[..]);
                                 // TODO: Handle execution result
                                 let child_store_bytes =
                                     bincode::serialize(&child_vm.state).unwrap();
@@ -204,15 +204,10 @@ impl VM {
         // Write action bytes into wasm memory
         let memory = instance.context_mut().memory(0);
 
-        let values = instance
-            .call(
-                "_run",
-                // &[Value::I32(0), Value::I32(action_bytes.len() as i32)],
-                &[],
-            )
-            .expect("Calling run method failed");
+        instance
+            .call(function_name, &[])
+            .expect("Calling vm method failed");
 
-        shared_context.state.remove(&b"input".to_vec());
         self.state = shared_context.state.clone();
         self.code = shared_context.code.clone();
     }
