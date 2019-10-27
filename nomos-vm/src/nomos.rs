@@ -1,6 +1,8 @@
 use byteorder::ByteOrder;
-use nomos_runtime::root::ExecutionMessage;
+use failure::Error;
+use nomos_runtime::ExecutionMessage;
 use serde::{Deserialize, Serialize};
+use std::boxed::Box;
 use std::collections::HashMap;
 use std::str;
 use wasmer_runtime::{
@@ -16,6 +18,7 @@ type Instantiator = fn(&[u8], &ImportObject) -> error::Result<Instance>;
 pub struct SharedContext {
     pub state: HashMap<Vec<u8>, Vec<u8>>,
     pub instantiate: Instantiator,
+    pub code: Vec<u8>,
 }
 
 impl VM {
@@ -32,11 +35,12 @@ impl VM {
     pub fn next(&mut self, action_bytes: &Vec<u8>) {
         let mut last_state: HashMap<Vec<u8>, Vec<u8>> = self.state.clone();
         last_state.insert(b"input".to_vec(), action_bytes.to_vec());
-        last_state.insert(b"code".to_vec(), self.code.to_vec());
+        // last_state.insert(b"code".to_vec(), self.code.to_vec());
 
         let mut shared_context = SharedContext {
             state: last_state,
             instantiate,
+            code: self.code.clone(),
         };
 
         let get_length = |ctx: &mut Ctx, length_result_ptr: u32, key_ptr: u32, key_len: u32| {
@@ -51,18 +55,24 @@ impl VM {
                 .iter()
                 .map(|cell: &std::cell::Cell<u8>| cell.get())
                 .collect();
-            let state_value = state.get(&key_vec).unwrap();
-            let mut value_length_to_write = [0 as u8; 4];
-            byteorder::LittleEndian::write_u32(
-                &mut value_length_to_write,
-                state_value.len() as u32,
-            );
-            // Next, write the length value bytes into wasm memory
-            for (byte, cell) in value_length_to_write.iter().zip(
-                memory.view()[length_result_ptr as usize..(length_result_ptr + 4) as usize].iter(),
-            ) {
-                cell.set(*byte);
-            }
+            let state_value = state.get(&key_vec);
+            match state_value {
+                Some(val) => {
+                    let mut value_length_to_write = [0 as u8; 4];
+                    byteorder::LittleEndian::write_u32(
+                        &mut value_length_to_write,
+                        val.len() as u32,
+                    );
+                    // Next, write the length value bytes into wasm memory
+                    for (byte, cell) in value_length_to_write.iter().zip(
+                        memory.view()[length_result_ptr as usize..(length_result_ptr + 4) as usize]
+                            .iter(),
+                    ) {
+                        cell.set(*byte);
+                    }
+                }
+                None => (),
+            };
         };
 
         let get_state = |ctx: &mut Ctx, key_ptr: u32, key_len: u32, result_vec_ptr: u32| {
@@ -119,43 +129,60 @@ impl VM {
                 .map(|cell: &std::cell::Cell<u8>| cell.get())
                 .collect();
 
-            state.insert(b"code".to_vec(), code_vec);
+            shared_context.code = code_vec;
         };
 
-        let execute_code =
-            |ctx: &mut Ctx, execution_msg_bytes_ptr: u32, execution_msg_bytes_len: u32| {
-                let mut shared_context: &mut SharedContext =
-                    unsafe { &mut *(ctx.data as *mut SharedContext) };
-                let state = &mut shared_context.state;
-                let instantiate_child = &mut shared_context.instantiate;
-                let memory = ctx.memory(0);
-                let execution_msg_bytes: Vec<_> = memory.view()[execution_msg_bytes_ptr as usize
-                    ..(execution_msg_bytes_ptr + execution_msg_bytes_len) as usize]
-                    .iter()
-                    .map(|cell: &std::cell::Cell<u8>| cell.get())
-                    .collect();
+        let execute_code = |ctx: &mut Ctx,
+                            execution_msg_bytes_ptr: u32,
+                            execution_msg_bytes_len: u32| {
+            let mut shared_context: &mut SharedContext =
+                unsafe { &mut *(ctx.data as *mut SharedContext) };
+            let state = &mut shared_context.state;
+            let memory = ctx.memory(0);
+            let execution_msg_bytes: Vec<_> = memory.view()[execution_msg_bytes_ptr as usize
+                ..(execution_msg_bytes_ptr + execution_msg_bytes_len) as usize]
+                .iter()
+                .map(|cell: &std::cell::Cell<u8>| cell.get())
+                .collect();
 
-                let execution_msg: ExecutionMessage =
-                    bincode::deserialize(&execution_msg_bytes).unwrap();
+            let execution_msg: ExecutionMessage =
+                bincode::deserialize(&execution_msg_bytes).unwrap();
 
-                match execution_msg {
-                    ExecutionMessage::Start { code_key } => {
-                        let code_to_execute = state.get(&code_key).unwrap();
-                        println!("got code to execute.");
-                        let child = instantiate_child(
-                            code_to_execute.as_slice(),
-                            &imports! {
-                                "env" => {
-                                    "print_str" => func!(print_str),
-                                },
-                            },
-                        )
-                        .unwrap();
-                        child.call("_run", &[]).expect("Child call failed");
-                    }
-                    _ => panic!("Invalid first execution message"),
-                };
+            let code_to_execute = state.get(&execution_msg.code_key);
+            match code_to_execute {
+                Some(code) => {
+                    let mut child_vm = VM::new(code.to_vec());
+                    let value_at_store_key = state.get(&execution_msg.store_key);
+                    if let Some(value_bytes) = value_at_store_key {
+                        let child_store_result: Result<
+                            HashMap<Vec<u8>, Vec<u8>>,
+                            Box<bincode::ErrorKind>,
+                        > = bincode::deserialize(&value_bytes);
+                        match child_store_result {
+                            Err(e) => {
+                                // Return execution error: invalid store bytes
+                                return ();
+                            }
+                            Ok(child_store) => {
+                                child_vm.state = child_store;
+                                let empty_input: Vec<u8> = vec![0; 0];
+                                let execution_result = child_vm.next(&empty_input);
+                                // TODO: Handle execution result
+                                let child_store_bytes =
+                                    bincode::serialize(&child_vm.state).unwrap();
+                                state.insert(execution_msg.store_key.to_vec(), child_store_bytes);
+                            }
+                        }
+                    } else {
+                        // Execution error result: store not found
+                        return ();
+                    };
+                }
+                None => {
+                    // Return execution result with error: code not found
+                }
             };
+        };
 
         let dtor = (|_: *mut std::ffi::c_void| {}) as fn(*mut std::ffi::c_void);
         let ptr = &mut shared_context as *mut _ as *mut std::ffi::c_void;
@@ -185,12 +212,9 @@ impl VM {
             )
             .expect("Calling run method failed");
 
+        shared_context.state.remove(&b"input".to_vec());
         self.state = shared_context.state.clone();
-        self.code = shared_context
-            .state
-            .get(&b"code".to_vec())
-            .unwrap()
-            .to_vec();
+        self.code = shared_context.code.clone();
     }
 }
 

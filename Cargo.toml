@@ -1,9 +1,0 @@
-[workspace]
-
-members = [
-  "nomos-vm",
-  "nomos-runtime",
-  "addition-wasm",
-  "multiplication-wasm",
-  "actions",
-]

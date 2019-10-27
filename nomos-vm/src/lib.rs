@@ -5,10 +5,12 @@ mod tests {
     use crate::nomos;
     #[test]
     fn my_test() {
-        let addition_bytes =
-            include_bytes!("../../target/wasm32-unknown-unknown/release/addition_wasm.wasm");
-        let multiply_bytes =
-            include_bytes!("../../target/wasm32-unknown-unknown/release/multiplication_wasm.wasm");
+        let addition_bytes = include_bytes!(
+            "../../addition-wasm/target/wasm32-unknown-unknown/release/addition_wasm.wasm"
+        );
+        let multiply_bytes = include_bytes!(
+            "../../multiplication-wasm/target/wasm32-unknown-unknown/release/multiplication_wasm.wasm"
+        );
         let mut vm = nomos::VM::new(addition_bytes.to_vec());
         // let msg = nomos::Action::Increment(12);
         let increment_msg = actions::Action::Increment(6);
