@@ -1,8 +1,10 @@
 [package]
 name = "nomos-runtime"
+description = "Library for use in Nomos WASM programs"
 version = "0.1.0"
 authors = ["Judd <kepzorz@gmail.com>"]
 edition = "2018"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
