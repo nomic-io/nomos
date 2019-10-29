@@ -17,7 +17,7 @@ pub struct SharedContext {
 
 impl VM {
     pub fn new(code: Vec<u8>) -> VM {
-        let mut state: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+        let state: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
         VM { code, state }
     }
 
@@ -31,7 +31,7 @@ impl VM {
     }
 
     pub fn call(&mut self, function_name: &str) {
-        let mut last_state: HashMap<Vec<u8>, Vec<u8>> = self.state.clone();
+        let last_state: HashMap<Vec<u8>, Vec<u8>> = self.state.clone();
 
         let mut shared_context = SharedContext {
             state: last_state,
@@ -40,7 +40,7 @@ impl VM {
 
         let get_length = |ctx: &mut Ctx, length_result_ptr: u32, key_ptr: u32, key_len: u32| {
             // Think of this line as a very fancy reference to the state variable from above:
-            let mut shared_context: &mut SharedContext =
+            let shared_context: &mut SharedContext =
                 unsafe { &mut *(ctx.data as *mut SharedContext) };
             let state = &mut shared_context.state;
             let memory = ctx.memory(0);
@@ -70,7 +70,7 @@ impl VM {
 
         let get_state = |ctx: &mut Ctx, key_ptr: u32, key_len: u32, result_vec_ptr: u32| {
             // Think of this line as a very fancy reference to the state variable from above:
-            let mut shared_context: &mut SharedContext =
+            let shared_context: &mut SharedContext =
                 unsafe { &mut *(ctx.data as *mut SharedContext) };
             let state = &mut shared_context.state;
 
@@ -93,7 +93,7 @@ impl VM {
 
         let set_state =
             |ctx: &mut Ctx, key_ptr: u32, key_len: u32, value_ptr: u32, value_len: u32| {
-                let mut shared_context: &mut SharedContext =
+                let shared_context: &mut SharedContext =
                     unsafe { &mut *(ctx.data as *mut SharedContext) };
                 let state = &mut shared_context.state;
 
@@ -115,7 +115,6 @@ impl VM {
         let upgrade_code = |ctx: &mut Ctx, code_ptr: u32, code_len: u32| {
             let mut shared_context: &mut SharedContext =
                 unsafe { &mut *(ctx.data as *mut SharedContext) };
-            let state = &mut shared_context.state;
             let memory = ctx.memory(0);
             let code_vec: Vec<_> = memory.view()[code_ptr as usize..(code_ptr + code_len) as usize]
                 .iter()
@@ -128,7 +127,7 @@ impl VM {
         let execute_code = |ctx: &mut Ctx,
                             execution_msg_bytes_ptr: u32,
                             execution_msg_bytes_len: u32| {
-            let mut shared_context: &mut SharedContext =
+            let shared_context: &mut SharedContext =
                 unsafe { &mut *(ctx.data as *mut SharedContext) };
             let state = &mut shared_context.state;
             let memory = ctx.memory(0);
@@ -152,7 +151,7 @@ impl VM {
                             Box<bincode::ErrorKind>,
                         > = bincode::deserialize(&value_bytes);
                         match child_store_result {
-                            Err(e) => {
+                            Err(_) => {
                                 // Return execution error: invalid store bytes
                                 return ();
                             }
@@ -193,9 +192,7 @@ impl VM {
             },
         };
 
-        let mut instance = instantiate(self.code.as_slice(), &import_object).unwrap();
-        // Write action bytes into wasm memory
-        let memory = instance.context_mut().memory(0);
+        let instance = instantiate(self.code.as_slice(), &import_object).unwrap();
 
         instance
             .call(function_name, &[])

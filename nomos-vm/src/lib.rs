@@ -1,4 +1,4 @@
-mod nomos;
+pub mod nomos;
 
 #[cfg(test)]
 mod tests {
@@ -13,7 +13,6 @@ mod tests {
         );
         let mut vm = nomos::VM::new(addition_bytes.to_vec());
         let increment_msg = actions::Action::Increment(6);
-
         let increment_msg_bytes = bincode::serialize(&increment_msg).unwrap();
 
         vm.set(b"input", increment_msg_bytes);
